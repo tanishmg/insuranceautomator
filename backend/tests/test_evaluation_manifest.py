@@ -1,3 +1,4 @@
+
 import copy
 import json
 from pathlib import Path
@@ -19,7 +20,11 @@ FIXTURE = Path(__file__).parent / "fixtures" / "evaluation" / "synthetic_manifes
 
 
 def _annotation(status: str = "adjudicated", annotator: str | None = "ann-01") -> dict:
-    return {"annotator": annotator, "status": status, "annotated_at": "2026-10-01T12:00:00Z"}
+    return {
+        "annotator": annotator,
+        "status": status,
+        "annotated_at": "2026-10-01T12:00:00Z",
+    }
 
 
 def _base() -> dict:
@@ -39,10 +44,20 @@ def _base() -> dict:
                     {
                         "damage_type": "Dent",
                         "location": "front bumper",
-                        "bbox": {"x_min": 0.1, "y_min": 0.1, "x_max": 0.5, "y_max": 0.5},
+                        "bbox": {
+                            "x_min": 0.1,
+                            "y_min": 0.1,
+                            "x_max": 0.5,
+                            "y_max": 0.5,
+                        },
                     }
                 ],
                 "image_quality": "ok",
+                "provenance": {
+                    "source_kind": "own_photo",
+                    "consent_or_license_ref": "test-consent-record-001",
+                },
+                "privacy_redacted": True,
             },
             {
                 "fixture_id": "img-b1",
@@ -51,6 +66,11 @@ def _base() -> dict:
                 "sha256": "b" * 64,
                 "visible_damage": [],
                 "image_quality": "blurry",
+                "provenance": {
+                    "source_kind": "own_photo",
+                    "consent_or_license_ref": "test-consent-record-001",
+                },
+                "privacy_redacted": True,
             },
         ],
         "claims": [
@@ -168,15 +188,25 @@ def test_synthetic_manifest_rejects_file_source():
 
 def test_tagged_adversarial_references_are_allowed():
     data = _base()
-    data["claims"][0].update(cited_fixture_ids=["img-zzz"], adversarial_tag="fabricated_reference")
-    data["claims"][1].update(cited_fixture_ids=["img-a1"], adversarial_tag="cross_inspection_reference")
+    data["claims"][0].update(
+        cited_fixture_ids=["img-zzz"],
+        adversarial_tag="fabricated_reference",
+    )
+    data["claims"][1].update(
+        cited_fixture_ids=["img-a1"],
+        adversarial_tag="cross_inspection_reference",
+    )
     m = _parse(data)
     assert m.claims[0].adversarial_tag == "fabricated_reference"
 
 
 def test_duplicate_json_keys_rejected():
     text = json.dumps(_base())
-    text = text.replace('"dataset_version": "real-v1"', '"dataset_version": "real-v1", "dataset_version": "x"', 1)
+    text = text.replace(
+        '"dataset_version": "real-v1"',
+        '"dataset_version": "real-v1", "dataset_version": "x"',
+        1,
+    )
     with pytest.raises(ValueError, match="duplicate JSON key"):
         parse_manifest(text)
 
@@ -202,12 +232,20 @@ def test_manifest_is_frozen():
 
 def test_gold_labels_default_only_adjudicated():
     gold = gold_labels(_parse(_base()))
-    assert gold == {"a-c1": GoldLabel.SUPPORTED, "b-c1": None, "b-c2": None}
+    assert gold == {
+        "a-c1": GoldLabel.SUPPORTED,
+        "b-c1": None,
+        "b-c2": None,
+    }
 
 
 def test_gold_labels_can_include_drafts():
     gold = gold_labels(_parse(_base()), require_status=("adjudicated", "draft"))
-    assert gold == {"a-c1": GoldLabel.SUPPORTED, "b-c1": GoldLabel.UNVERIFIABLE, "b-c2": None}
+    assert gold == {
+        "a-c1": GoldLabel.SUPPORTED,
+        "b-c1": GoldLabel.UNVERIFIABLE,
+        "b-c2": None,
+    }
 
 
 def test_gold_labels_rejects_unknown_or_empty_status():
@@ -237,7 +275,9 @@ def test_split_by_inspection_keeps_inspections_whole():
     m = _parse(_base())
     split = split_by_inspection(m, test_fraction=0.5, salt="s")
     assert set(split.dev_inspections).isdisjoint(split.test_inspections)
-    assert set(split.dev_claims) | set(split.test_claims) == {c.claim_key for c in m.claims}
+    assert set(split.dev_claims) | set(split.test_claims) == {
+        c.claim_key for c in m.claims
+    }
     owner = {c.claim_key: c.inspection_key for c in m.claims}
     assert all(owner[k] in split.dev_inspections for k in split.dev_claims)
     assert all(owner[k] in split.test_inspections for k in split.test_claims)
@@ -265,6 +305,7 @@ def test_synthetic_fixture_loads_and_is_flagged():
 def test_synthetic_fixture_coverage():
     m = load_manifest(FIXTURE)
     tags = {c.adversarial_tag for c in m.claims}
+
     for tag in (
         "wrong_location",
         "invented_damage",
@@ -276,9 +317,21 @@ def test_synthetic_fixture_coverage():
         "cross_inspection_reference",
     ):
         assert tag in tags
+
     types = {c.claim_type.value for c in m.claims}
-    assert {"repair_cost", "damage_cause", "hidden_structural_damage", "visible_damage_presence"} <= types
-    assert {img.image_quality for img in m.images} >= {"ok", "blurry", "low_resolution"}
+    assert {
+        "repair_cost",
+        "damage_cause",
+        "hidden_structural_damage",
+        "visible_damage_presence",
+    } <= types
+
+    assert {img.image_quality for img in m.images} >= {
+        "ok",
+        "blurry",
+        "low_resolution",
+    }
+
     gold = gold_labels(m)
     assert set(gold) == {c.claim_key for c in m.claims}
     assert {g for g in gold.values() if g is not None} == set(GoldLabel)
